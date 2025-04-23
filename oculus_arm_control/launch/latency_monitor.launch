@@ -1,0 +1,76 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Network monitoring parameters -->
+  <arg name="rosbridge_url" default="ws://localhost:9090" />
+  <arg name="ping_interval" default="0.1" />     <!-- 10 Hz -->
+  <arg name="window_size" default="100" />       <!-- Average over last 100 samples -->
+  <arg name="timeout_threshold" default="1.0" /> <!-- 1 second timeout -->
+  <arg name="stats_interval" default="5.0" />    <!-- Print stats every 5 seconds -->
+  <arg name="log_to_console" default="false" />  <!-- Detailed console logging -->
+  <arg name="monitor_vr_latency" default="true" /> <!-- Monitor VR-to-arm latency -->
+  
+  <!-- Data logging parameters -->
+  <arg name="enable_logging" default="false" />
+  <arg name="log_directory" default="$(find oculus_arm_control)/logs" />
+  <arg name="log_filename" default="latency_log_$(arg ping_interval)_$(anon time)" />
+  
+  <!-- Network condition simulation parameters -->
+  <arg name="simulate_network" default="false" /> <!-- Enable network condition simulation -->
+  <arg name="fixed_delay" default="0.0" />        <!-- Fixed delay in ms -->
+  <arg name="variable_delay" default="0.0" />     <!-- Variable delay in ms (0-value) -->
+  <arg name="network_jitter" default="0.0" />     <!-- Network jitter in ms -->
+  <arg name="packet_loss" default="0.0" />        <!-- Packet loss probability (0.0-1.0) -->
+  <arg name="burst_loss" default="0.0" />         <!-- Burst packet loss probability (0.0-1.0) -->
+  <arg name="burst_length" default="5.0" />       <!-- Length of burst loss periods in seconds -->
+  <arg name="burst_interval" default="60.0" />    <!-- Interval between burst loss periods in seconds -->
+  
+  <!-- Launch the rosbridge server -->
+  <include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch">
+    <arg name="port" value="9090" />
+  </include>
+  
+  <!-- Launch the latency monitor node -->
+  <node name="network_latency_node" pkg="oculus_arm_control" type="network_latency_node" output="screen">
+    <param name="rosbridge_url" value="$(arg rosbridge_url)" />
+    <param name="ping_interval" value="$(arg ping_interval)" />
+    <param name="window_size" value="$(arg window_size)" />
+    <param name="timeout_threshold" value="$(arg timeout_threshold)" />
+    <param name="stats_interval" value="$(arg stats_interval)" />
+    <param name="log_to_console" value="$(arg log_to_console)" />
+    <param name="monitor_vr_latency" value="$(arg monitor_vr_latency)" />
+    
+    <!-- Pass log file path if logging is enabled -->
+    <param name="log_file" value="$(arg log_directory)/$(arg log_filename).csv" if="$(arg enable_logging)" />
+    
+    <!-- Create log directory if it doesn't exist -->
+    <node name="create_log_dir" pkg="oculus_arm_control" type="mkdir -p $(arg log_directory)" if="$(arg enable_logging)"
+          args="-p" output="screen" launch-prefix="bash -c" />
+  </node>
+  
+  <!-- Launch the latency responder node -->
+  <node name="latency_responder" pkg="oculus_arm_control" type="latency_responder.py" output="screen"
+        args="$(eval '--fixed-delay %s --variable-delay %s --jitter %s --packet-loss %s --burst-loss %s --burst-length %s --burst-interval %s' % 
+              (fixed_delay if simulate_network else 0.0,
+               variable_delay if simulate_network else 0.0,
+               network_jitter if simulate_network else 0.0,
+               packet_loss if simulate_network else 0.0,
+               burst_loss if simulate_network else 0.0,
+               burst_length if simulate_network else 5.0,
+               burst_interval if simulate_network else 60.0))" />
+  
+  <!-- Launch rqt_plot for visualization -->
+  <node name="rqt_plot" pkg="rqt_plot" type="rqt_plot" 
+        args="/latency/measurement /latency/jitter /latency/packet_loss" />
+  
+  <!-- Launch rqt_graph to show node connections -->
+  <node name="rqt_graph" pkg="rqt_graph" type="rqt_graph" />
+  
+  <!-- Launch dynamic_reconfigure GUI for adjusting parameters at runtime -->
+  <node name="rqt_reconfigure" pkg="rqt_reconfigure" type="rqt_reconfigure" />
+  
+  <!-- Launch web server for the web interface if present -->
+  <arg name="web_server_port" default="8080" />
+  <node name="web_server" pkg="oculus_arm_control" type="web_server.py"
+        args="--port $(arg web_server_port) --webroot $(find oculus_arm_control)/web" 
+        output="screen" if="$(eval os.path.exists('$(find oculus_arm_control)/web'))" />
+</launch> 

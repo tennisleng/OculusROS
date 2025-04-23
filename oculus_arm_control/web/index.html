@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oculus-ROS Latency Monitor</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 20px;
+      background-color: #f8f9fa;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    .card {
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    
+    .card-header {
+      background-color: #f1f8ff;
+      border-bottom: 1px solid rgba(0,0,0,0.125);
+      font-weight: bold;
+    }
+    
+    .stat-card {
+      text-align: center;
+      padding: 15px;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+    }
+    
+    .stat-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 6px 10px rgba(0,0,0,0.15);
+    }
+    
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+    
+    .stat-label {
+      color: #6c757d;
+      font-size: 14px;
+    }
+    
+    .status-indicator {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+    
+    .status-connected {
+      background-color: #28a745;
+    }
+    
+    .status-disconnected {
+      background-color: #6c757d;
+    }
+    
+    .status-error {
+      background-color: #dc3545;
+    }
+    
+    .network-quality-0 { background-color: #dc3545; }
+    .network-quality-1 { background-color: #f75e31; }
+    .network-quality-2 { background-color: #ffc107; }
+    .network-quality-3 { background-color: #adb5bd; }
+    .network-quality-4 { background-color: #6cb5fe; }
+    .network-quality-5 { background-color: #28a745; }
+    
+    .chart-container {
+      position: relative;
+      height: 280px;
+      width: 100%;
+    }
+    
+    .tab-pane {
+      padding: 20px 0;
+    }
+    
+    .controls-section {
+      margin-bottom: 15px;
+    }
+    
+    #latency-gauge, #jitter-gauge, #packet-loss-gauge {
+      width: 100%;
+      height: 150px;
+    }
+    
+    #network-quality-indicator {
+      width: 100%;
+      height: 25px;
+      margin: 10px 0;
+      border-radius: 4px;
+      position: relative;
+    }
+    
+    #network-quality-indicator:before {
+      content: attr(data-quality);
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-weight: bold;
+      z-index: 1;
+    }
+    
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 9999;
+    }
+    
+    .log-entry {
+      padding: 5px 10px;
+      border-bottom: 1px solid #dee2e6;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    
+    .log-entry.warn {
+      background-color: #fff3cd;
+    }
+    
+    .log-entry.error {
+      background-color: #f8d7da;
+    }
+    
+    .log-entry.info {
+      background-color: #cce5ff;
+    }
+    
+    .controls-row {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="mb-0">Oculus-ROS Latency Monitor</h1>
+      <span id="connection-status">
+        <span class="status-indicator status-disconnected"></span>
+        <span id="status-text">Disconnected</span>
+      </span>
+    </header>
+    
+    <!-- Connection Card -->
+    <div class="card">
+      <div class="card-header">
+        Connection
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-6">
+            <div class="input-group mb-3">
+              <input type="text" class="form-control" id="server-url" placeholder="ws://localhost:9090">
+              <button class="btn btn-primary" type="button" id="connect-button">Connect</button>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="d-flex align-items-center">
+              <div class="me-3">
+                <label for="network-quality" class="form-label mb-0">Network Quality:</label>
+                <div id="network-quality-indicator" class="network-quality-0" data-quality="N/A"></div>
+              </div>
+              <div>
+                <button class="btn btn-sm btn-outline-secondary" id="reset-stats-button">Reset Statistics</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs" id="monitorTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard" type="button" role="tab">Dashboard</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="charts-tab" data-bs-toggle="tab" data-bs-target="#charts" type="button" role="tab">Charts</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="vr-tab" data-bs-toggle="tab" data-bs-target="#vr-latency" type="button" role="tab">VR Latency</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="controls-tab" data-bs-toggle="tab" data-bs-target="#network-controls" type="button" role="tab">Network Controls</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="logs-tab" data-bs-toggle="tab" data-bs-target="#logs" type="button" role="tab">Logs</button>
+      </li>
+    </ul>
+    
+    <!-- Tab Content -->
+    <div class="tab-content" id="monitorTabsContent">
+      <!-- Dashboard Tab -->
+      <div class="tab-pane fade show active" id="dashboard" role="tabpanel">
+        <div class="row">
+          <!-- Latency Gauges Row -->
+          <div class="col-md-4">
+            <div class="card">
+              <div class="card-header">Latency</div>
+              <div class="card-body">
+                <div id="latency-gauge"></div>
+                <div class="text-center">
+                  <span class="stat-value" id="latency">--</span>
+                  <span class="stat-label">Client-measured Latency (ms)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="col-md-4">
+            <div class="card">
+              <div class="card-header">Jitter</div>
+              <div class="card-body">
+                <div id="jitter-gauge"></div>
+                <div class="text-center">
+                  <span class="stat-value" id="jitter">--</span>
+                  <span class="stat-label">Jitter (ms)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="col-md-4">
+            <div class="card">
+              <div class="card-header">Packet Loss</div>
+              <div class="card-body">
+                <div id="packet-loss-gauge"></div>
+                <div class="text-center">
+                  <span class="stat-value" id="packet-loss">--</span>
+                  <span class="stat-label">Packet Loss (%)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Statistics Row -->
+        <div class="row mt-4">
+          <div class="col-md-12">
+            <div class="card">
+              <div class="card-header">Latency Statistics</div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-md-3">
+                    <div class="stat-card bg-light">
+                      <div class="stat-value" id="mean-latency">--</div>
+                      <div class="stat-label">Mean (ms)</div>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="stat-card bg-light">
+                      <div class="stat-value" id="min-latency">--</div>
+                      <div class="stat-label">Min (ms)</div>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="stat-card bg-light">
+                      <div class="stat-value" id="max-latency">--</div>
+                      <div class="stat-label">Max (ms)</div>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="stat-card bg-light">
+                      <div class="stat-value" id="stddev-latency">--</div>
+                      <div class="stat-label">StdDev (ms)</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Charts Tab -->
+      <div class="tab-pane fade" id="charts" role="tabpanel">
+        <div class="card">
+          <div class="card-header">Latency Over Time</div>
+          <div class="card-body">
+            <div class="chart-container">
+              <canvas id="latency-chart"></canvas>
+            </div>
+          </div>
+        </div>
+        
+        <div class="row mt-4">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">Jitter Over Time</div>
+              <div class="card-body">
+                <div class="chart-container">
+                  <canvas id="jitter-chart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">Packet Loss Over Time</div>
+              <div class="card-body">
+                <div class="chart-container">
+                  <canvas id="packet-loss-chart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- VR Latency Tab -->
+      <div class="tab-pane fade" id="vr-latency" role="tabpanel">
+        <div class="card">
+          <div class="card-header">VR to Arm Latency</div>
+          <div class="card-body">
+            <div class="chart-container">
+              <canvas id="vr-latency-chart"></canvas>
+            </div>
+          </div>
+        </div>
+        
+        <div class="row mt-4">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">VR Input Visualization</div>
+              <div class="card-body">
+                <div id="vr-controller-viz" style="height: 300px; background-color: #f5f5f5; border-radius: 8px; position: relative;">
+                  <!-- Controller visualization will be rendered here -->
+                  <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);" id="vr-controller-not-available">
+                    No VR controller data available
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header">End-to-End Performance</div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-md-6">
+                    <div class="stat-card bg-light">
+                      <div class="stat-value" id="vr-latency">--</div>
+                      <div class="stat-label">VR-to-Arm Latency (ms)</div>
+                    </div>
+                  </div>
+                  <div class="col-md-6">
+                    <div class="stat-card bg-light">
+                      <div class="stat-value" id="total-latency">--</div>
+                      <div class="stat-label">Total System Latency (ms)</div>
+                    </div>
+                  </div>
+                </div>
+                
+                <hr>
+                
+                <h5>Latency Breakdown</h5>
+                <div class="progress mb-3" style="height: 25px;">
+                  <div class="progress-bar bg-primary" id="network-latency-bar" role="progressbar" style="width: 33%;" aria-valuenow="33" aria-valuemin="0" aria-valuemax="100">Network</div>
+                  <div class="progress-bar bg-success" id="processing-latency-bar" role="progressbar" style="width: 33%;" aria-valuenow="33" aria-valuemin="0" aria-valuemax="100">Processing</div>
+                  <div class="progress-bar bg-info" id="rendering-latency-bar" role="progressbar" style="width: 34%;" aria-valuenow="34" aria-valuemin="0" aria-valuemax="100">Rendering</div>
+                </div>
+                
+                <div class="small text-muted">
+                  * Breakdown is estimated based on typical VR system characteristics
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Network Controls Tab -->
+      <div class="tab-pane fade" id="network-controls" role="tabpanel">
+        <div class="card">
+          <div class="card-header">Network Condition Simulation</div>
+          <div class="card-body">
+            <div class="alert alert-info">
+              <i class="bi bi-info-circle"></i> 
+              These controls affect the responder node, allowing you to simulate different network conditions.
+              Changes will take effect immediately.
+            </div>
+            
+            <form id="network-simulation-form">
+              <div class="row controls-row">
+                <div class="col-md-6">
+                  <label for="fixed-delay" class="form-label">Fixed Delay (ms)</label>
+                  <div class="d-flex align-items-center">
+                    <input type="range" class="form-range me-2" id="fixed-delay" min="0" max="500" step="10" value="0">
+                    <span id="fixed-delay-value" class="badge bg-secondary" style="width: 60px;">0</span>
+                  </div>
+                </div>
+                
+                <div class="col-md-6">
+                  <label for="variable-delay" class="form-label">Variable Delay Range (ms)</label>
+                  <div class="d-flex align-items-center">
+                    <input type="range" class="form-range me-2" id="variable-delay" min="0" max="200" step="5" value="0">
+                    <span id="variable-delay-value" class="badge bg-secondary" style="width: 60px;">0</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="row controls-row">
+                <div class="col-md-6">
+                  <label for="jitter" class="form-label">Network Jitter (ms ±)</label>
+                  <div class="d-flex align-items-center">
+                    <input type="range" class="form-range me-2" id="jitter" min="0" max="100" step="5" value="0">
+                    <span id="jitter-value" class="badge bg-secondary" style="width: 60px;">0</span>
+                  </div>
+                </div>
+                
+                <div class="col-md-6">
+                  <label for="packet-loss-rate" class="form-label">Packet Loss (%)</label>
+                  <div class="d-flex align-items-center">
+                    <input type="range" class="form-range me-2" id="packet-loss-rate" min="0" max="10" step="0.5" value="0">
+                    <span id="packet-loss-rate-value" class="badge bg-secondary" style="width: 60px;">0</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="row controls-row">
+                <div class="col-md-6">
+                  <label for="burst-loss-rate" class="form-label">Burst Loss (%)</label>
+                  <div class="d-flex align-items-center">
+                    <input type="range" class="form-range me-2" id="burst-loss-rate" min="0" max="30" step="1" value="0">
+                    <span id="burst-loss-rate-value" class="badge bg-secondary" style="width: 60px;">0</span>
+                  </div>
+                </div>
+                
+                <div class="col-md-6">
+                  <div class="row">
+                    <div class="col-md-6">
+                      <label for="burst-length" class="form-label">Burst Length (s)</label>
+                      <div class="d-flex align-items-center">
+                        <input type="range" class="form-range me-2" id="burst-length" min="1" max="20" step="1" value="5">
+                        <span id="burst-length-value" class="badge bg-secondary" style="width: 60px;">5</span>
+                      </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                      <label for="burst-interval" class="form-label">Burst Interval (s)</label>
+                      <div class="d-flex align-items-center">
+                        <input type="range" class="form-range me-2" id="burst-interval" min="10" max="120" step="10" value="60">
+                        <span id="burst-interval-value" class="badge bg-secondary" style="width: 60px;">60</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="d-flex justify-content-between mt-4">
+                <button type="button" class="btn btn-secondary" id="reset-network-button">Reset to Default</button>
+                <button type="button" class="btn btn-primary" id="apply-network-button">Apply Settings</button>
+              </div>
+              
+              <div class="row mt-4">
+                <div class="col-md-12">
+                  <div class="card">
+                    <div class="card-header">Preset Network Conditions</div>
+                    <div class="card-body">
+                      <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-outline-primary preset-button" data-preset="perfect">Perfect</button>
+                        <button type="button" class="btn btn-outline-primary preset-button" data-preset="good">Good (5ms, low jitter)</button>
+                        <button type="button" class="btn btn-outline-primary preset-button" data-preset="average">Average (25ms, some jitter)</button>
+                        <button type="button" class="btn btn-outline-primary preset-button" data-preset="poor">Poor (75ms, high jitter)</button>
+                        <button type="button" class="btn btn-outline-primary preset-button" data-preset="wifi">WiFi (15ms, variable)</button>
+                        <button type="button" class="btn btn-outline-primary preset-button" data-preset="mobile">Mobile (50ms, packet loss)</button>
+                        <button type="button" class="btn btn-outline-primary preset-button" data-preset="unstable">Unstable (burst loss)</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Logs Tab -->
+      <div class="tab-pane fade" id="logs" role="tabpanel">
+        <div class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Event Log</span>
+            <button class="btn btn-sm btn-outline-secondary" id="clear-logs-button">Clear Logs</button>
+          </div>
+          <div class="card-body p-0">
+            <div id="log-container" style="height: 500px; overflow-y: auto;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Toast for messages -->
+    <div class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="3000">
+      <div class="toast-header">
+        <strong class="me-auto" id="toast-title">Message</strong>
+        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+      <div class="toast-body" id="toast-message">
+        Message content here.
+      </div>
+    </div>
+  </div>
+  
+  <!-- Load required libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gauge.js@2.1.7/dist/gauge.min.js"></script>
+  <script src="https://static.robotwebtools.org/roslibjs/current/roslib.min.js"></script>
+  <script src="latency_client.js"></script>
+</body>
+</html> 

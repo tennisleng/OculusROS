@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>oculus_arm_control</name>
+  <version>0.1.0</version>
+  <description>Package for controlling a robotic arm using Oculus VR controllers</description>
+  <maintainer email="user@example.com">Your Name</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  
+  <depend>roscpp</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+
+  <exec_depend>oculus_ros</exec_depend>
+  <exec_depend>moveit_ros</exec_depend>
+</package>

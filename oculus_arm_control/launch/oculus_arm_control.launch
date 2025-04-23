@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Launch Oculus ROS driver -->
+    <include file="$(find oculus_ros)/launch/oculus_driver.launch" />
+    
+    <!-- Launch robot arm driver -->
+    <!-- Replace with the actual robot arm driver launch file -->
+    <include file="$(find your_robot_package)/launch/robot_driver.launch" />
+    
+    <!-- Launch our control nodes -->
+    <node name="oculus_interface_node" pkg="oculus_arm_control" type="oculus_interface_node" output="screen">
+        <param name="use_right_controller" value="true" />
+        <param name="scale_factor" value="0.5" />
+    </node>
+    
+    <node name="arm_controller_node" pkg="oculus_arm_control" type="arm_controller_node" output="screen">
+        <param name="arm_base_frame" value="arm_base_link" />
+        <param name="arm_ee_frame" value="arm_ee_link" />
+        <param name="max_velocity" value="0.1" />
+    </node>
+</launch> 
